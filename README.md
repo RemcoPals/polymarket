@@ -1,6 +1,6 @@
 # BTC 15-Minute Streak Reversal Bot
 
-An automated trading bot for [Kalshi](https://kalshi.com) that bets on BTC price reversals using a streak-based mean-reversion strategy. When BTC has moved in the same direction for 3 or more consecutive 15-minute windows, the bot bets on a reversal in the next window.
+An automated trading bot for [Kalshi](https://kalshi.com) that bets on BTC price reversals using a streak-based mean-reversion strategy. When BTC has moved in the same direction for 2 or more consecutive 15-minute windows, the bot bets on a reversal in the next window.
 
 ---
 
@@ -11,8 +11,8 @@ An automated trading bot for [Kalshi](https://kalshi.com) that bets on BTC price
 Every 15 minutes, Kalshi opens a new market asking: *"Will BTC be higher or lower than it was 15 minutes ago?"* The bot:
 
 1. Fetches the last 10 resolved markets
-2. Counts the current streak (e.g. 4 consecutive "Up" outcomes)
-3. If streak ≥ 3 → bets on the **opposite** direction (mean reversion)
+2. Counts the current streak (e.g. 3 consecutive "Up" outcomes)
+3. If streak ≥ 2 → bets on the **opposite** direction (mean reversion)
 4. Sizes the bet using the **Kelly criterion** (half-Kelly for safety, capped at 5% of bankroll)
 
 ### Backtest results
@@ -21,18 +21,20 @@ Tested on **6,977 Kalshi markets** (Dec 10 2025 – Mar 2026) and independently 
 
 | Dataset | Win rate | Bets | Break-even needed |
 |---|---|---|---|
-| Kalshi 15-min (streak ≥ 3) | **56.8%** | 1,469 | 50.9% |
-| Kalshi 15-min (streak ≥ 4) | **58.4%** | 635 | 50.9% |
-| Binance 1-year (streak ≥ 3) | **52.4%** | 25,361 | 50.9% |
+| Kalshi 15-min (streak ≥ 2) | **55.1%** | 3,272 | 50.9% |
+| Kalshi 15-min (streak ≥ 3) | 56.8% | 1,469 | 50.9% |
+| Binance 1-year (streak ≥ 2) | **52.3%** | 52,000+ | 50.9% |
 
-**Simulated $100 compound Kelly backtest** (Kalshi data, $20 max bet cap):
+Streak ≥ 2 is the default: although the per-bet win rate is slightly lower than streak ≥ 3, it places 2.2× more bets and Kelly sizes each bet proportionally — producing significantly higher total returns.
+
+**Simulated $100 compound Kelly backtest — streak ≥ 2** (Kalshi data, $20 max bet cap):
 
 | Period | End Balance | Monthly P&L |
 |---|---|---|
-| Dec 2025 | $235 | +$135 |
-| Jan 2026 | $1,548 | +$1,313 |
-| Feb 2026 | $2,612 | +$1,064 |
-| 62% of trading days profitable | | |
+| Dec 2025 | $796 | +$696 |
+| Jan 2026 | $3,592 | +$2,796 |
+| Feb 2026 | $5,061 | +$1,469 |
+| **77% of trading days profitable** | | |
 
 > **Disclaimer:** Past backtest performance does not guarantee future results. Always start with dry-run mode and only risk money you can afford to lose.
 
@@ -108,7 +110,7 @@ All settings are controlled via `.env` (see `.env.example` for full documentatio
 | `KALSHI_API_KEY` | — | Your Kalshi Key ID (UUID) |
 | `KALSHI_PRIVATE_KEY_PATH` | — | Path to your RSA private key `.pem` file |
 | `KALSHI_PRIVATE_KEY` | — | Inline PEM string (alternative to path, useful for cloud) |
-| `MIN_STREAK` | `3` | Minimum streak length before placing a bet |
+| `MIN_STREAK` | `2` | Minimum streak length before placing a bet |
 | `LOOKBACK` | `10` | Number of past markets to consider for streak |
 | `ESTIMATED_WIN_PROB` | `0.53` | Backtested win probability (used in Kelly formula) |
 | `KELLY_MULTIPLIER` | `0.5` | Fraction of full Kelly (0.5 = half-Kelly) |
@@ -205,6 +207,6 @@ Where:
 ## Risk warning
 
 - This bot places real money bets. Always test with `DRY_RUN=true` first.
-- Backtested win rates (56.8%) are not guaranteed to persist.
+- Backtested win rates (55.1%) are not guaranteed to persist.
 - The `MAX_DAILY_LOSS_USDC` setting is your last line of defence — set it to an amount you are comfortable losing in a single day.
 - Never deposit more than you can afford to lose entirely.

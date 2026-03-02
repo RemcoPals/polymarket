@@ -13,7 +13,7 @@ class Config:
     kalshi_private_key: str = ""   # full PEM string of your RSA private key
 
     # Strategy parameters
-    min_streak: int = 3
+    min_streak: int = 2
     lookback:   int = 10   # number of recent resolved markets to fetch
 
     # Kelly criterion parameters
