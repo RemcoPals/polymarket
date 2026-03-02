@@ -1,0 +1,12 @@
+app = "polymarket-bot"
+primary_region = "ams"
+
+[build]
+
+[http_service]
+  # No HTTP service needed — this is a background worker
+  force_https = false
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "256mb"
