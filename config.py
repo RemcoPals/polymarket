@@ -36,9 +36,10 @@ class Config:
             with open(key_path) as f:
                 self.kalshi_private_key = f.read()
         else:
-            # Inline PEM stored in .env (newlines as \n)
+            # Inline PEM stored in env (fly.io / Railway may single- or double-escape \n)
             raw = os.getenv("KALSHI_PRIVATE_KEY", self.kalshi_private_key)
-            self.kalshi_private_key = raw.replace("\\n", "\n")
+            # Handle both literal \n sequences and actual newlines
+            self.kalshi_private_key = raw.replace("\\n", "\n").replace("\\\\n", "\n")
 
         self.min_streak = int(os.getenv("MIN_STREAK", str(self.min_streak)))
         self.lookback   = int(os.getenv("LOOKBACK",   str(self.lookback)))
