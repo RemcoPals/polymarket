@@ -1,0 +1,11 @@
+app = 'polymarket-bot-summer-dream-2184'
+primary_region = 'ams'
+
+[build]
+  dockerfile = 'deploy/Dockerfile'
+  [build.args]
+    ASSET = 'btc'
+
+[[vm]]
+  size = 'shared-cpu-1x'
+  memory = '256mb'

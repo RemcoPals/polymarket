@@ -1,0 +1,11 @@
+app = 'polymarket-eth-bot'
+primary_region = 'ams'
+
+[build]
+  dockerfile = 'deploy/Dockerfile'
+  [build.args]
+    ASSET = 'eth'
+
+[[vm]]
+  size = 'shared-cpu-1x'
+  memory = '256mb'

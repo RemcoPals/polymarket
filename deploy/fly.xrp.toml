@@ -1,0 +1,11 @@
+app = 'polymarket-xrp-bot'
+primary_region = 'ams'
+
+[build]
+  dockerfile = 'deploy/Dockerfile'
+  [build.args]
+    ASSET = 'xrp'
+
+[[vm]]
+  size = 'shared-cpu-1x'
+  memory = '256mb'

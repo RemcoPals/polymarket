@@ -1,0 +1,30 @@
+# Deploy ETH and BTC bots to fly.io on every push to main.
+# SOL and XRP bots are deployed manually (flyctl deploy --config deploy/fly.sol.toml).
+
+name: Fly Deploy
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  deploy-eth:
+    name: Deploy ETH bot
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: superfly/flyctl-actions/setup-flyctl@master
+      - run: flyctl deploy --remote-only --config deploy/fly.eth.toml
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+
+  deploy-btc:
+    name: Deploy BTC bot
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: superfly/flyctl-actions/setup-flyctl@master
+      - run: flyctl deploy --remote-only --config deploy/fly.btc.toml
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
