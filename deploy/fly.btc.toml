@@ -2,7 +2,7 @@ app = 'polymarket-bot-summer-dream-2184'
 primary_region = 'ams'
 
 [build]
-  dockerfile = 'deploy/Dockerfile'
+  dockerfile = 'Dockerfile'
   [build.args]
     ASSET = 'btc'
 

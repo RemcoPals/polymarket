@@ -2,7 +2,7 @@ app = 'polymarket-eth-bot'
 primary_region = 'ams'
 
 [build]
-  dockerfile = 'deploy/Dockerfile'
+  dockerfile = 'Dockerfile'
   [build.args]
     ASSET = 'eth'
 
