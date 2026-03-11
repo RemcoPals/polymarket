@@ -194,7 +194,8 @@ def run_bot(asset: str) -> None:
     wins            = 0
     losses          = 0
     early_exits     = 0
-    pending_bet: dict | None = None
+    pending_bet: dict | None       = None
+    _last_close_recorded           = None  # dedup: track latest_close we've fed to regime tracker
 
     regime_tracker = RegimeTracker(
         rev_window          = cfg.rev_window,
@@ -271,6 +272,8 @@ def run_bot(asset: str) -> None:
                 pnl = usdc_received - pending_bet["bet_usdc"]
                 balance += pnl
                 early_exits += 1
+                if pending_bet.get("bet_regime") == REGIME_SAFE:
+                    regime_tracker.record_bet(correct=pnl > 0)
                 pnl_str = f"+${pnl:.2f}" if pnl >= 0 else f"-${abs(pnl):.2f}"
                 print(f"  RESULT  : EARLY EXIT ({pending_bet['early_exit']})  {pnl_str}  "
                       f"(received ${usdc_received:.2f})")
@@ -288,14 +291,17 @@ def run_bot(asset: str) -> None:
                         )
                         balance += profit
                         wins    += 1
-                        regime_tracker.record_bet(correct=True)
+                        # Only reversal bets feed the regime tracker (it was calibrated on those)
+                        if pending_bet.get("bet_regime") == REGIME_SAFE:
+                            regime_tracker.record_bet(correct=True)
                         print(f"  RESULT  : WIN  +${profit:.2f}  ({pending_bet['signal']} won)")
                         print(f"  Balance : ${balance:.2f}  (started at ${start_bal:.2f})")
                         pending_bet = None
                     elif outcome == "Loss":
                         balance -= pending_bet["bet_usdc"]
                         losses  += 1
-                        regime_tracker.record_bet(correct=False)
+                        if pending_bet.get("bet_regime") == REGIME_SAFE:
+                            regime_tracker.record_bet(correct=False)
                         print(f"  RESULT  : LOSS -${pending_bet['bet_usdc']:.2f}  "
                               f"({pending_bet['signal']} lost)")
                         print(f"  Balance : ${balance:.2f}  (started at ${start_bal:.2f})")
@@ -309,9 +315,10 @@ def run_bot(asset: str) -> None:
             print(f"  Not enough data ({len(outcomes)} markets) -- skipping")
             continue
 
-        # 3. Update regime tracker with all resolved candle outcomes
-        for o in outcomes:
-            regime_tracker.record_outcome(o)
+        # 3. Update regime tracker with only the newest candle (dedup by close time)
+        if outcomes and latest_close and latest_close != _last_close_recorded:
+            regime_tracker.record_outcome(outcomes[-1])
+            _last_close_recorded = latest_close
 
         # 3a. Compute streak
         direction, streak = compute_streak(outcomes)
@@ -452,6 +459,7 @@ def run_bot(asset: str) -> None:
                 "price_cents": result["price_cents"],
                 "count":       result["count"],
                 "bet_usdc":    result["usdc_spent"],
+                "bet_regime":  regime,  # track which regime triggered this bet
             }
 
             # 8. Monitor mid-market for dynamic exit (if enabled)
