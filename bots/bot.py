@@ -19,7 +19,11 @@ from datetime import datetime, timezone
 from bots.config import Config
 from bots.kalshi_client import KalshiClient
 from bots.strategy import (
+    REGIME_MOMENTUM,
+    REGIME_PAUSE,
+    REGIME_SAFE,
     DynamicExitManager,
+    RegimeTracker,
     compute_streak,
     get_binance_magnitude,
     get_signal,
@@ -163,6 +167,12 @@ def run_bot(asset: str) -> None:
     print(f"  tiered_kelly   : streak→edge {dict(sorted(cfg.streak_edge_table.items()))}")
     mag_status = f"ENABLED (>={cfg.magnitude_threshold_sigma:.1f}σ +{cfg.magnitude_bonus_edge:.3f} edge)" if cfg.use_magnitude_filter else "disabled"
     print(f"  magnitude_filt : {mag_status}")
+    regime_status = (
+        f"ENABLED (pause<{cfg.pause_rev_thresh:.0%} / momentum<{cfg.momentum_rev_thresh:.0%} / "
+        f"bias>{cfg.pause_bias_thresh:.0%})"
+        if cfg.use_regime_filter else "disabled"
+    )
+    print(f"  regime_filter  : {regime_status}")
     print(f"  dynamic_exit   : {'ENABLED' if cfg.enable_dynamic_exit else 'disabled'}", end="")
     if cfg.enable_dynamic_exit:
         print(f"  (TP={cfg.tp_cents}c / SL={cfg.sl_cents}c / min_hold={cfg.min_hold_secs}s)", end="")
@@ -185,6 +195,14 @@ def run_bot(asset: str) -> None:
     losses          = 0
     early_exits     = 0
     pending_bet: dict | None = None
+
+    regime_tracker = RegimeTracker(
+        rev_window          = cfg.rev_window,
+        bias_window         = cfg.bias_window,
+        pause_rev_thresh    = cfg.pause_rev_thresh,
+        momentum_rev_thresh = cfg.momentum_rev_thresh,
+        pause_bias_thresh   = cfg.pause_bias_thresh,
+    )
 
     while True:
         _sleep_until_next_slot()
@@ -270,12 +288,14 @@ def run_bot(asset: str) -> None:
                         )
                         balance += profit
                         wins    += 1
+                        regime_tracker.record_bet(correct=True)
                         print(f"  RESULT  : WIN  +${profit:.2f}  ({pending_bet['signal']} won)")
                         print(f"  Balance : ${balance:.2f}  (started at ${start_bal:.2f})")
                         pending_bet = None
                     elif outcome == "Loss":
                         balance -= pending_bet["bet_usdc"]
                         losses  += 1
+                        regime_tracker.record_bet(correct=False)
                         print(f"  RESULT  : LOSS -${pending_bet['bet_usdc']:.2f}  "
                               f"({pending_bet['signal']} lost)")
                         print(f"  Balance : ${balance:.2f}  (started at ${start_bal:.2f})")
@@ -289,15 +309,39 @@ def run_bot(asset: str) -> None:
             print(f"  Not enough data ({len(outcomes)} markets) -- skipping")
             continue
 
-        # 3. Compute streak and signal
+        # 3. Update regime tracker with all resolved candle outcomes
+        for o in outcomes:
+            regime_tracker.record_outcome(o)
+
+        # 3a. Compute streak
         direction, streak = compute_streak(outcomes)
-        signal = get_signal(outcomes, cfg.min_streak)
         recent_display = " ".join("U" if o == "Up" else "D" for o in outcomes[-8:])
         print(f"  Recent  : [{recent_display}]")
-        print(f"  Streak  : {direction} x{streak}  ->  signal: {signal or 'SKIP'}")
+        print(f"  Streak  : {direction} x{streak}")
 
-        if signal is None:
+        # 3b. Classify regime and determine signal
+        if cfg.use_regime_filter:
+            regime = regime_tracker.regime()
+            print(f"  Regime  : {regime_tracker.summary()}")
+        else:
+            regime = REGIME_SAFE
+
+        if streak < cfg.min_streak:
+            # Not enough streak for any bet
+            print(f"  Signal  : SKIP (streak {streak} < {cfg.min_streak})")
             continue
+
+        if regime == REGIME_PAUSE:
+            print(f"  Signal  : SKIP (regime=PAUSE — noisy, ~50% accuracy)")
+            continue
+        elif regime == REGIME_MOMENTUM:
+            # Flip to continuation: bet in the SAME direction as the streak
+            signal = direction   # 'Up' or 'Down'
+            print(f"  Signal  : {signal} (CONTINUATION — momentum regime)")
+        else:
+            # Safe regime: standard reversal
+            signal = "Down" if direction == "Up" else "Up"
+            print(f"  Signal  : {signal} (REVERSAL — safe regime)")
 
         # 4. Daily loss guard
         daily_loss = daily_start_bal - balance
@@ -326,8 +370,11 @@ def run_bot(asset: str) -> None:
         # 6. Compute total signal edge and Kelly bet size
         price = market["up_price"] if signal == "Up" else market["down_price"]
 
-        # Strategy F: tiered edge based on streak length
-        base_edge  = get_streak_signal_edge(streak, cfg)
+        # Strategy F: tiered edge (reversal) OR flat continuation edge
+        if regime == REGIME_MOMENTUM:
+            base_edge = cfg.continuation_edge
+        else:
+            base_edge = get_streak_signal_edge(streak, cfg)
         total_edge = base_edge
 
         # Strategy C: magnitude bonus if previous candle was large

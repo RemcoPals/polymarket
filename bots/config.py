@@ -44,6 +44,19 @@ class Config:
     # Set to None here; populated in __post_init__ to avoid mutable default
     streak_edge_table: dict = None  # {streak_len: edge}
 
+    # Strategy R: Regime detection (3-state: reversal / pause / continuation)
+    # Thresholds calibrated on ETH Binance 1y (35k windows, 7k streak bets).
+    # safe:      rev_acc>=50% AND dir_bias<=5%  -> REVERSAL  (~60.5% acc)
+    # pause:     rev_acc 45-50% OR dir_bias>5%  -> SKIP      (~50% acc, too noisy)
+    # momentum:  rev_acc<45%                    -> CONTINUATION (~57-69% acc)
+    use_regime_filter:       bool  = True   # env: USE_REGIME_FILTER
+    rev_window:              int   = 30     # env: REV_WINDOW
+    bias_window:             int   = 96     # env: BIAS_WINDOW  (96 x 15m = 24h)
+    pause_rev_thresh:        float = 0.50   # env: PAUSE_REV_THRESH
+    momentum_rev_thresh:     float = 0.45   # env: MOMENTUM_REV_THRESH
+    pause_bias_thresh:       float = 0.05   # env: PAUSE_BIAS_THRESH
+    continuation_edge:       float = 0.07   # env: CONTINUATION_EDGE
+
     # Strategy C: Previous-period magnitude filter (Binance candle)
     # Only bet when |log(close/open)| of previous 15m candle exceeds threshold.
     # Backtested: >1σ → 58.8% OOS accuracy (vs 55% baseline). Disabled by default.
@@ -94,6 +107,15 @@ class Config:
         # Strategy F defaults (no env overrides — recalibrate via notebook then update here)
         if self.streak_edge_table is None:
             self.streak_edge_table = {3: 0.056, 4: 0.056, 5: 0.080, 6: 0.080}
+
+        # Strategy R
+        self.use_regime_filter     = os.getenv("USE_REGIME_FILTER", "true").lower() in ("true", "1")
+        self.rev_window            = int(os.getenv("REV_WINDOW",           str(self.rev_window)))
+        self.bias_window           = int(os.getenv("BIAS_WINDOW",          str(self.bias_window)))
+        self.pause_rev_thresh      = float(os.getenv("PAUSE_REV_THRESH",   str(self.pause_rev_thresh)))
+        self.momentum_rev_thresh   = float(os.getenv("MOMENTUM_REV_THRESH",str(self.momentum_rev_thresh)))
+        self.pause_bias_thresh     = float(os.getenv("PAUSE_BIAS_THRESH",  str(self.pause_bias_thresh)))
+        self.continuation_edge     = float(os.getenv("CONTINUATION_EDGE",  str(self.continuation_edge)))
 
         # Strategy C
         self.use_magnitude_filter      = os.getenv("USE_MAGNITUDE_FILTER", "false").lower() in ("true", "1")

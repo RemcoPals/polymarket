@@ -8,6 +8,11 @@ Backtested accuracy (ETH 15-min, streak ≥ 3):
   - Polymarket 16k dataset:  56.18%  (3,519 bets)
   - Binance 1y dataset:      56.73%  (35,042 candles)
   - Break-even with 2% fee:  50.51%
+
+Regime detection (Strategy R -- 3-state):
+  Safe      : rev_acc_30 >= 50% AND dir_bias <= 5%  ->  bet REVERSAL  (~60.5% acc)
+  Pause     : rev_acc_30 45-50% OR dir_bias 5-8%    ->  SKIP          (~50% acc, noisy)
+  Momentum  : rev_acc_30 < 45%                      ->  bet CONTINUATION (~57-69% acc)
 """
 
 import json
@@ -265,3 +270,137 @@ def get_binance_magnitude(asset: str, timeout: int = 5) -> float | None:
         return abs(math.log(close_p / open_p))
     except Exception:
         return None
+
+
+# ---------------------------------------------------------------------------
+# Strategy R: Regime detection -- 3-state (reversal / pause / continuation)
+# ---------------------------------------------------------------------------
+
+# Regime state constants
+REGIME_SAFE       = "safe"        # bet reversal as normal
+REGIME_PAUSE      = "pause"       # skip this slot (noisy, ~50%)
+REGIME_MOMENTUM   = "momentum"    # flip to continuation bet
+
+
+class RegimeTracker:
+    """
+    Tracks two rolling indicators to classify the current market regime:
+
+      1. Rolling reversal accuracy (last `rev_window` streak bets):
+           rev_acc < pause_rev_thresh  -> pause
+           rev_acc < momentum_rev_thresh -> momentum (flip to continuation)
+
+      2. 1-day directional bias  |Up_fraction - 0.5|  over last `bias_window` outcomes:
+           dir_bias > pause_bias_thresh -> pause
+
+    Backtested thresholds (ETH Binance 1y, 35k windows):
+      - pause_rev_thresh    = 0.50  (below this, reversal edge < 0.5%)
+      - momentum_rev_thresh = 0.45  (below this, continuation wins 57-69%)
+      - pause_bias_thresh   = 0.05  (>5% directional imbalance in 24h -> noisy)
+
+    Usage:
+        tracker = RegimeTracker()
+        # after each settled bet:
+        tracker.record_bet(correct=True/False)
+        # after each resolved candle:
+        tracker.record_outcome(winner="Up"/"Down")
+        # before placing the next bet:
+        regime = tracker.regime()
+        if regime == REGIME_MOMENTUM:
+            signal = direction  # bet continuation
+        elif regime == REGIME_PAUSE:
+            continue            # skip
+        else:
+            signal = reversal   # normal
+    """
+
+    def __init__(
+        self,
+        rev_window:            int   = 30,
+        bias_window:           int   = 96,
+        pause_rev_thresh:      float = 0.50,
+        momentum_rev_thresh:   float = 0.45,
+        pause_bias_thresh:     float = 0.05,
+    ) -> None:
+        self.rev_window          = rev_window
+        self.bias_window         = bias_window
+        self.pause_rev_thresh    = pause_rev_thresh
+        self.momentum_rev_thresh = momentum_rev_thresh
+        self.pause_bias_thresh   = pause_bias_thresh
+
+        self._bet_outcomes: list[int] = []   # 1=correct, 0=wrong, oldest first
+        self._candle_outcomes: list[str] = []  # 'Up'/'Down', oldest first
+
+    # ---- update methods ------------------------------------------------
+
+    def record_bet(self, correct: bool) -> None:
+        """Call after each streak bet resolves (win or loss)."""
+        self._bet_outcomes.append(1 if correct else 0)
+
+    def record_outcome(self, winner: str) -> None:
+        """Call after each 15-min candle resolves ('Up' or 'Down')."""
+        self._candle_outcomes.append(winner)
+        # Keep only what we need
+        if len(self._candle_outcomes) > self.bias_window * 2:
+            self._candle_outcomes = self._candle_outcomes[-self.bias_window * 2:]
+
+    # ---- computed indicators -------------------------------------------
+
+    def rolling_rev_acc(self) -> float | None:
+        """Reversal accuracy over the last `rev_window` bets. None if insufficient data."""
+        recent = self._bet_outcomes[-self.rev_window:]
+        if len(recent) < max(10, self.rev_window // 3):
+            return None
+        return sum(recent) / len(recent)
+
+    def directional_bias(self) -> float | None:
+        """
+        |Up_fraction - 0.5| over the last `bias_window` candles.
+        Returns None if insufficient data.
+        """
+        recent = self._candle_outcomes[-self.bias_window:]
+        if len(recent) < self.bias_window // 2:
+            return None
+        up_frac = recent.count("Up") / len(recent)
+        return abs(up_frac - 0.5)
+
+    # ---- main classification -------------------------------------------
+
+    def regime(self) -> str:
+        """
+        Classify current regime as REGIME_SAFE, REGIME_PAUSE, or REGIME_MOMENTUM.
+
+        Decision tree (in priority order):
+          1. rev_acc < momentum_rev_thresh  -> MOMENTUM  (flip to continuation)
+          2. rev_acc < pause_rev_thresh     -> PAUSE     (skip, noisy)
+          3. dir_bias > pause_bias_thresh   -> PAUSE     (strong directional trend)
+          4. otherwise                      -> SAFE      (reversal as normal)
+
+        Falls back to SAFE when there is insufficient history.
+        """
+        rev_acc = self.rolling_rev_acc()
+        bias    = self.directional_bias()
+
+        if rev_acc is not None and rev_acc < self.momentum_rev_thresh:
+            return REGIME_MOMENTUM
+
+        if rev_acc is not None and rev_acc < self.pause_rev_thresh:
+            return REGIME_PAUSE
+
+        if bias is not None and bias > self.pause_bias_thresh:
+            return REGIME_PAUSE
+
+        return REGIME_SAFE
+
+    def summary(self) -> str:
+        """One-line status string for logging."""
+        rev_acc = self.rolling_rev_acc()
+        bias    = self.directional_bias()
+        rev_s   = f"{rev_acc:.1%}" if rev_acc is not None else "n/a"
+        bias_s  = f"{bias:.1%}"    if bias    is not None else "n/a"
+        n_bets  = len(self._bet_outcomes)
+        return (
+            f"regime={self.regime().upper():<10} "
+            f"rev_acc={rev_s}(n={n_bets}) "
+            f"dir_bias={bias_s}"
+        )
